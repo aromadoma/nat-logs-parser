@@ -106,6 +106,27 @@ def calculate_archive_date(start_datetime):
     return archive_date
 
 
+def get_specific_period_logs(archive_name, search_data):
+    path_to_archive = os.path.join(os.path.dirname(__file__), archive_name)
+    specific_period_logs = []
+    additional_period_logs = []
+    # timedelta = timedelta(minutes=30)
+    if '.gz' in archive_name:
+        with gzip.open(path_to_archive) as f:
+            for line in f:
+                log_datetime = datetime.fromisoformat(re.search(r'^(\S+)\+03:00', line.decode('utf-8')).group(1))
+                if search_data['start_datetime'] <= log_datetime <= search_data['stop_datetime']:
+                    specific_period_logs.append(line.decode('utf-8').rstrip('\n'))
+                elif search_data['stop_datetime'] <= log_datetime <= search_data['stop_datetime'] + timedelta(minutes=30):
+                    additional_period_logs.append(line.decode('utf-8').rstrip('\n'))
+                elif log_datetime > search_data['stop_datetime'] + timedelta(minutes=30):
+                    break
+            return specific_period_logs, additional_period_logs
+    else:
+        with open(path_to_archive) as f:
+            pass
+
+
 def main():
     # Path to parameters file:
     parameters_path = os.path.join(os.path.dirname(__file__), 'parameters.json')
@@ -122,16 +143,16 @@ def main():
     # Loop for the whole script:
     while True:
         # Waiting for valid user data to be entered:
+        print('This script searches private ip addresses which been translated by nat')
         while True:
-            if shit_counter < 3:
-                print('This script searches private ip addresses which been translated by nat')
-                print('The format should be used for request: <public_ip> <start_date> <start_time> <stop_time>')
+            if shit_counter < 5:
+                print('The format should be used for request: <public_ip> <start_date> <start_time> <stop_date> <stop_time>')
             else:
                 print('Ah shit, here we go again.')
-            print('An example: 11.1.1.1 2020-09-01 19:56 20:05')
+            print('An example: 11.1.1.1 2020-09-01 19:56 2020-09-01 20:05')
 
             # Entering data and checking if it's valid:
-            search_data = validate_user_input(input('\nWhat are we searching?> '))
+            search_data = validate_user_input(input('What are we searching?> '))
             if search_data is not None:
                 shit_counter = 0
                 break
@@ -142,10 +163,10 @@ def main():
         cgn_hostname = search_for_cgnat_name(search_data['public_ip'], nat_pools)
 
         # Calculating the needed archive date:
-        archive_date = calculate_archive_date(search_data['start_date'], search_data['start_time'])
+        archive_date = calculate_archive_date(search_data['start_datetime'])
 
         # Connecting to syslog server:
-        print('Connecting to the syslog server... ', end='')
+        print('Connecting to the syslog server... ')
         ssh_connection = connection_to_server(ssh_username, ssh_password, device_ip)
         if archive_date != 'TODAY':
             server_output = ssh_connection.send_command(
@@ -155,18 +176,13 @@ def main():
             archive_name = 'secured-pba.log'
 
         # Downloading a log file:
-        print('Downloading the log file... ', end='')
+        print(f"Path to log file: '/var/log/{cgn_hostname}/{archive_name}', date is {archive_date}.")
+        print('Downloading the log file... ')
         file_transfer(ssh_connection, source_file=archive_name, dest_file=archive_name,
                       file_system=f'/var/log/{cgn_hostname}/', direction='get', overwrite_file=True)
 
-        print(f'DONE. Filename is "{archive_name}".')
-        exit()
-
-
-# with gzip.open('secured-pba.log.100.gz-downloaded') as f:
-#     for line in f:
-#         print(line)
-#         exit()
+        # Opening the log file and pull only logs from required time period:
+        specific_period_logs, additional_period_logs = get_specific_period_logs(archive_name, search_data)
 
 
 if __name__ == '__main__':
