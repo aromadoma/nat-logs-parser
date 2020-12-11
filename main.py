@@ -5,7 +5,7 @@ import json
 import re
 import ipaddress
 import os
-from datetime import date, time, timedelta, datetime
+from datetime import date, time, datetime, timedelta
 
 
 def connection_to_server(ssh_username, ssh_password, device_ip):
@@ -29,13 +29,13 @@ def connection_to_server(ssh_username, ssh_password, device_ip):
         try:
             ssh_connection = ConnectHandler(**connection_settings)
         except AuthenticationException:
-            print(r'Wrong username\password.')
+            print(r'Wrong username\password. Please, check credentials.')
             i += 1
         except NetMikoTimeoutException:
-            print(f'Syslog is unreachable.')
+            print(f'Syslog is unreachable for now. Trying again...')
             i += 1
         else:
-            print('Successfully authenticated.')
+            # print('Successfully authenticated.')
             return ssh_connection
 
     print(f'Cannot connect to syslog. Skipping')
@@ -44,63 +44,42 @@ def connection_to_server(ssh_username, ssh_password, device_ip):
 
 def validate_user_input(user_input):
     user_data = {}
-    string = re.search(r'(\S+) (\S+) (\S+) (\S+)', user_input)
+    string = re.search(r'(\S+) (\S+ \S+) (\S+ \S+)', user_input)
+    if string is None:
+        print('Please, check for entered data.\n')
+        return None
 
     # Validating ip address:
     try:
         user_data['public_ip'] = ipaddress.ip_address(string.group(1))
     except ValueError:
-        print('ERROR: IP address is invalid.\n')
+        print('ERROR: IP address is invalid.')
         return None
     if user_data['public_ip'].is_private:
-        print('ERROR: IP address is private.\n')
+        print('ERROR: IP address is private.')
         return None
 
-    # Validating start date:
-    start_date_raw = string.group(2)
-    start_date = re.search('^((?:2019)|(?:2020))-((?:0[1-9])|(?:1[0-2]))-((?:0[0-9])|(?:[1-2][0-9])|(?:3[0-1]))$',
-                           start_date_raw)
-    if start_date is not None:
-        # user_data['start_year'] = start_date.group(1)
-        # user_data['start_month'] = start_date.group(2)
-        # user_data['start_day'] = start_date.group(3)
-        user_data['start_date'] = date.fromisoformat(start_date.group())
-        if user_data['start_date'] > date.today():
-            print('ERROR: Start date is in the future.\n')
-            return None
-    else:
-        print('ERROR: Start date is incorrect.\n')
+    # Validating start date and time:
+    try:
+        user_data['start_datetime'] = datetime.fromisoformat(string.group(2))
+    except ValueError:
+        print('ERROR: Start date or time is invalid.')
+        return None
+    if user_data['start_datetime'] > datetime.today():
+        print('ERROR: Start date or time is in the future.')
         return None
 
-    # Validating start time:
-    start_time_raw = string.group(3)
-    start_time = re.search('^((?:[0-1][0-9])|(?:2[0-3])):([0-5][0-9])$', start_time_raw)
-    if start_time is not None:
-        # user_data['start_hour'] = start_time.group(1)
-        # user_data['start_minute'] = start_time.group(2)
-        user_data['start_time'] = time.fromisoformat(start_time.group())
-        if user_data['start_date'] == date.today() and user_data['start_time'] > datetime.now().time():
-            print('ERROR: Start time is in the future.\n')
-            return None
-    else:
-        print('ERROR: Start time is incorrect.\n')
+    # Validating stop date and time:
+    try:
+        user_data['stop_datetime'] = datetime.fromisoformat(string.group(3))
+    except ValueError:
+        print('ERROR: Stop date or time is invalid.')
         return None
-
-    # Validating stop time:
-    stop_time_raw = string.group(4)
-    stop_time = re.search('^((?:[0-1][0-9])|(?:2[0-3])):([0-5][0-9])$', stop_time_raw)
-    if stop_time is not None:
-        # user_data['stop_hour'] = stop_time.group(1)
-        # user_data['stop_minute'] = stop_time.group(2)
-        user_data['stop_time'] = time.fromisoformat(stop_time.group())
-        if user_data['stop_time'] < user_data['start_time']:
-            print('ERROR: End time less than start time.\n')
-            return None
-        elif user_data['start_date'] == date.today() and user_data['stop_time'] > datetime.now().time():
-            print('ERROR: Stop time is in the future.\n')
-            return None
-    else:
-        print('ERROR: End time is incorrect.\n')
+    if user_data['stop_datetime'] > datetime.today():
+        print('ERROR: Stop date or time is in the future.')
+        return None
+    elif user_data['stop_datetime'] < user_data['start_datetime']:
+        print('ERROR: End time less than start time.')
         return None
 
     return user_data
@@ -115,14 +94,14 @@ def search_for_cgnat_name(ip_address, nat_pools):
     print('SORRY. This ip don\'t belongs to any nat pool. Please, check the ip.')
 
 
-def calculate_archive_date(start_date, start_time):
+def calculate_archive_date(start_datetime):
     archiving_time = time.fromisoformat('06:25')
-    if start_time > archiving_time and start_date < date.today():
-        archive_date = start_date + timedelta(days=1)
-    elif start_time > archiving_time and start_date == date.today():
+    if archiving_time < start_datetime.time() and start_datetime.date() < date.today():
+        archive_date = start_datetime.date() + timedelta(days=1)
+    elif archiving_time < start_datetime.time() and start_datetime.date() == date.today():
         archive_date = 'TODAY'
     else:
-        archive_date = start_date - timedelta(days=1)
+        archive_date = start_datetime.date() - timedelta(days=1)
 
     return archive_date
 
