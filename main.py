@@ -29,10 +29,10 @@ def connection_to_server(ssh_username, ssh_password, device_ip):
         try:
             ssh_connection = ConnectHandler(**connection_settings)
         except AuthenticationException:
-            print(r'Wrong username\password. Please, check credentials.')
+            print('Wrong username\\password. Please, check credentials.\n')
             i += 1
         except NetMikoTimeoutException:
-            print(f'Syslog is unreachable for now. Trying again...')
+            print('Syslog is unreachable for now. Trying again...\n')
             i += 1
         else:
             # print('Successfully authenticated.')
@@ -53,33 +53,33 @@ def validate_user_input(user_input):
     try:
         user_data['public_ip'] = ipaddress.ip_address(string.group(1))
     except ValueError:
-        print('ERROR: IP address is invalid.')
+        print('ERROR: IP address is invalid.\n')
         return None
     if user_data['public_ip'].is_private:
-        print('ERROR: IP address is private.')
+        print('ERROR: IP address is private.\n')
         return None
 
     # Validating start date and time:
     try:
         user_data['start_datetime'] = datetime.fromisoformat(string.group(2))
     except ValueError:
-        print('ERROR: Start date or time is invalid.')
+        print('ERROR: Start date or time is invalid.\n')
         return None
     if user_data['start_datetime'] > datetime.today():
-        print('ERROR: Start date or time is in the future.')
+        print('ERROR: Start date or time is in the future.\n')
         return None
 
     # Validating stop date and time:
     try:
         user_data['stop_datetime'] = datetime.fromisoformat(string.group(3))
     except ValueError:
-        print('ERROR: Stop date or time is invalid.')
+        print('ERROR: Stop date or time is invalid.\n')
         return None
     if user_data['stop_datetime'] > datetime.today():
-        print('ERROR: Stop date or time is in the future.')
+        print('ERROR: Stop date or time is in the future.\n')
         return None
     elif user_data['stop_datetime'] < user_data['start_datetime']:
-        print('ERROR: End time less than start time.')
+        print('ERROR: End time less than start time.\n')
         return None
 
     return user_data
@@ -101,30 +101,59 @@ def calculate_archive_date(start_datetime):
     elif archiving_time < start_datetime.time() and start_datetime.date() == date.today():
         archive_date = 'TODAY'
     else:
-        archive_date = start_datetime.date() - timedelta(days=1)
+        archive_date = start_datetime.date()
 
     return archive_date
 
 
+def string_parsing(f, search_data, decode=True):
+    main_period_logs = []
+    additional_period_logs = []
+    for line in f:
+        # There's no need to decode if it's the non-archived logfile from today:
+        if decode:
+            line = line.decode('utf-8')
+        log_datetime = datetime.fromisoformat(re.search(r'^(\S+)\+03:00', line).group(1))
+        if search_data['start_datetime'] <= log_datetime <= search_data['stop_datetime'] and str(
+                search_data['public_ip']) in line:
+            main_period_logs.append(line.rstrip('\n'))
+        elif search_data['stop_datetime'] <= log_datetime <= search_data['stop_datetime'] + timedelta(
+                minutes=30) and str(search_data['public_ip']) in line:
+            additional_period_logs.append(line.rstrip('\n'))
+        elif log_datetime > search_data['stop_datetime'] + timedelta(minutes=30) and str(
+                search_data['public_ip']) in line:
+            break
+    return main_period_logs, additional_period_logs
+
+
 def get_specific_period_logs(archive_name, search_data):
     path_to_archive = os.path.join(os.path.dirname(__file__), archive_name)
-    specific_period_logs = []
-    additional_period_logs = []
-    # timedelta = timedelta(minutes=30)
     if '.gz' in archive_name:
         with gzip.open(path_to_archive) as f:
-            for line in f:
-                log_datetime = datetime.fromisoformat(re.search(r'^(\S+)\+03:00', line.decode('utf-8')).group(1))
-                if search_data['start_datetime'] <= log_datetime <= search_data['stop_datetime']:
-                    specific_period_logs.append(line.decode('utf-8').rstrip('\n'))
-                elif search_data['stop_datetime'] <= log_datetime <= search_data['stop_datetime'] + timedelta(minutes=30):
-                    additional_period_logs.append(line.decode('utf-8').rstrip('\n'))
-                elif log_datetime > search_data['stop_datetime'] + timedelta(minutes=30):
-                    break
-            return specific_period_logs, additional_period_logs
+            main_period_logs, additional_period_logs = string_parsing(f, search_data)
     else:
         with open(path_to_archive) as f:
-            pass
+            main_period_logs, additional_period_logs = string_parsing(f, search_data, decode=False)
+
+    return main_period_logs, additional_period_logs
+
+
+def get_private_ip_list(main_period_logs, additional_period_logs):
+    private_ip_list = []
+    # Parsing all nat logs in main period of time:
+    for log in main_period_logs:
+        private_ip = re.search(r': (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}) ->', log).group(1)
+        if private_ip not in private_ip_list:
+            private_ip_list.append(private_ip)
+
+    # Parsing only the 'ALLOCATION' and 'RELEASE' logs in additional period of time:
+    for log in additional_period_logs:
+        if 'PORT_BLOCK_ACTIVE' in log or 'PORT_BLOCK_RELEASE' in log:
+            private_ip = re.search(r': (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}) ->', log).group(1)
+            if private_ip not in private_ip_list:
+                private_ip_list.append(private_ip)
+
+    return private_ip_list
 
 
 def main():
@@ -143,13 +172,13 @@ def main():
     # Loop for the whole script:
     while True:
         # Waiting for valid user data to be entered:
-        print('This script searches private ip addresses which been translated by nat')
+        print('\nThis script searches private ip addresses which been translated by nat')
         while True:
             if shit_counter < 5:
-                print('The format should be used for request: <public_ip> <start_date> <start_time> <stop_date> <stop_time>')
+                print('The format should be used: <public_ip> <start_date> <start_time> <stop_date> <stop_time>')
             else:
                 print('Ah shit, here we go again.')
-            print('An example: 11.1.1.1 2020-09-01 19:56 2020-09-01 20:05')
+            print('An example: 11.1.1.1 2020-09-01 19:56 2020-09-01 20:05\n')
 
             # Entering data and checking if it's valid:
             search_data = validate_user_input(input('What are we searching?> '))
@@ -179,10 +208,20 @@ def main():
         print(f"Path to log file: '/var/log/{cgn_hostname}/{archive_name}', date is {archive_date}.")
         print('Downloading the log file... ')
         file_transfer(ssh_connection, source_file=archive_name, dest_file=archive_name,
-                      file_system=f'/var/log/{cgn_hostname}/', direction='get', overwrite_file=True)
+                      file_system=f'/var/log/{cgn_hostname}/', disable_md5=True, direction='get', overwrite_file=True)
 
         # Opening the log file and pull only logs from required time period:
-        specific_period_logs, additional_period_logs = get_specific_period_logs(archive_name, search_data)
+        print('Parsing the log file...')
+        main_period_logs, additional_period_logs = get_specific_period_logs(archive_name, search_data)
+
+        # Creating private ip addresses list:
+        private_ip_list = get_private_ip_list(main_period_logs, additional_period_logs)
+
+        if len(private_ip_list) == 0:
+            print('No addresses have been found.\n\n')
+        print(f'{len(private_ip_list)} addresses have been found. Here they are:\n')
+        for private_ip in private_ip_list:
+            print(private_ip)
 
 
 if __name__ == '__main__':
