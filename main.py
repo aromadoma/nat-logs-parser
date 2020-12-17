@@ -93,7 +93,7 @@ def search_for_cgnat_name(ip_address, nat_pools):
             cgn_hostname = nat_pools[key]
             print(f'This ip belongs to {key} pool on {cgn_hostname}.')
             return cgn_hostname
-    print('\u001b[31mSORRY. This ip don\'t belongs to any nat pool. Please, check the ip.\u001b[0m')
+    print('\u001b[31mSORRY. This ip doesn\'t belong to any nat pool. Please, check the ip.\u001b[0m')
 
 
 def calculate_archive_date(start_datetime):
@@ -159,6 +159,47 @@ def get_private_ip_list(main_period_logs, additional_period_logs):
     return private_ip_list
 
 
+def handling_request(search_data, parameters):
+    # Searching for a CGN hostname:
+    cgn_hostname = search_for_cgnat_name(search_data['public_ip'], parameters['nat_pools'])
+
+    # Calculating the needed archive date:
+    archive_date = calculate_archive_date(search_data['start_datetime'])
+
+    # Connecting to syslog server:
+    print('Connecting to the syslog server... ')
+    ssh_connection = connection_to_server(parameters['ssh_username'], parameters['ssh_password'], parameters['device_ip'])
+    if archive_date != 'TODAY':
+        server_output = ssh_connection.send_command(
+            f'ls -oh --sort=time --time-style="long-iso" /var/log/{cgn_hostname}/ | grep "{archive_date}"')
+        archive_name = re.search(r'secured-pba\.log\.\d+\.gz', server_output).group()
+    else:
+        archive_name = 'secured-pba.log'
+
+    # Downloading a log file:
+    print(f"Path: '/var/log/{cgn_hostname}/{archive_name}', date is {archive_date}.")
+    print('Downloading the log file... ')
+    file_transfer(ssh_connection, source_file=archive_name, dest_file=archive_name,
+                  file_system=f'/var/log/{cgn_hostname}/', disable_md5=True, direction='get',
+                  overwrite_file=False)
+
+    # Opening the log file and pull only logs from required time period:
+    print('Parsing the log file...')
+    main_period_logs, additional_period_logs = get_specific_period_logs(archive_name, search_data)
+
+    # Creating private ip addresses list:
+    private_ip_list = get_private_ip_list(main_period_logs, additional_period_logs)
+
+    if len(private_ip_list) == 0:
+        print('No addresses have been found.\n\n')
+    else:
+        print(f'{len(private_ip_list)} addresses have been found:\n')
+        for private_ip in private_ip_list:
+            print(private_ip)
+
+    return None
+
+
 def write_to_file(private_ip_list):
     pass
 
@@ -168,22 +209,19 @@ def write_to_file(private_ip_list):
 @click.option("-h", "hours_from_start", type=int, help='Set hours number from start date as time period')
 @click.option("-m", 'minutes_from_start', type=int, help='Set minutes number from start date as time period')
 @click.option("-s", 'seconds_from_start', type=int, help='Set seconds number from start date as time period')
-@click.option("--screen", "is_on_screen_only", is_flag=True, help='Show results only on screen, do not write to file')
-def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_start, is_on_screen_only):
+@click.option("--screen", 'show_on_screen', is_flag=True, help='Show private ip list on screen')
+def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_start, show_on_screen):
     # Path to parameters file:
     parameters_path = os.path.join(os.path.dirname(__file__), 'parameters.json')
     with open(parameters_path) as parameters_file:
         # Loading parameters:
         parameters = json.load(parameters_file)
-        ssh_username = parameters['ssh_username']
-        ssh_password = parameters['ssh_password']
-        device_ip = parameters['device_ip']
-        nat_pools = parameters['nat_pools']
+        parameters['hours_from_start'] = hours_from_start
+        parameters['minutes_from_start'] = minutes_from_start
+        parameters['seconds_from_start'] = seconds_from_start
+        parameters['show_on_screen'] = show_on_screen
 
     shit_counter = 0
-
-    if is_on_screen_only:
-        click.echo('Results won\'t be written to file!')
 
     # If filename is given:
     if user_data_file:
@@ -195,7 +233,12 @@ def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_star
 
         for line in user_data_file:
             click.echo(f'\u001b[34mREQUEST:\u001b[0m {line}')
+            # Checking if data from file are valid:
             search_data = validate_user_input(line)
+            if search_data is not None:
+                # User request handling line by line:
+                handling_request(search_data, parameters)
+
     else:
         # If filename wasn't given, acting in dialog mode:
         while True:
@@ -217,42 +260,9 @@ def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_star
                 else:
                     shit_counter += 1
 
-            # Searching for a CGN hostname:
-            cgn_hostname = search_for_cgnat_name(search_data['public_ip'], nat_pools)
+            # User request handling:
+            handling_request(search_data, parameters)
 
-            # Calculating the needed archive date:
-            archive_date = calculate_archive_date(search_data['start_datetime'])
-
-            # Connecting to syslog server:
-            print('Connecting to the syslog server... ')
-            ssh_connection = connection_to_server(ssh_username, ssh_password, device_ip)
-            if archive_date != 'TODAY':
-                server_output = ssh_connection.send_command(
-                    f'ls -oh --sort=time --time-style="long-iso" /var/log/{cgn_hostname}/ | grep "{archive_date}"')
-                archive_name = re.search(r'secured-pba\.log\.\d+\.gz', server_output).group()
-            else:
-                archive_name = 'secured-pba.log'
-
-            # Downloading a log file:
-            print(f"Path: '/var/log/{cgn_hostname}/{archive_name}', date is {archive_date}.")
-            print('Downloading the log file... ')
-            file_transfer(ssh_connection, source_file=archive_name, dest_file=archive_name,
-                          file_system=f'/var/log/{cgn_hostname}/', disable_md5=True, direction='get',
-                          overwrite_file=False)
-
-            # Opening the log file and pull only logs from required time period:
-            print('Parsing the log file...')
-            main_period_logs, additional_period_logs = get_specific_period_logs(archive_name, search_data)
-
-            # Creating private ip addresses list:
-            private_ip_list = get_private_ip_list(main_period_logs, additional_period_logs)
-
-            if len(private_ip_list) == 0:
-                print('No addresses have been found.\n\n')
-            else:
-                print(f'{len(private_ip_list)} addresses have been found:\n')
-                for private_ip in private_ip_list:
-                    print(private_ip)
 
 
 # STARTING SCRIPT:
