@@ -1,11 +1,13 @@
-from netmiko.ssh_exception import AuthenticationException, NetMikoTimeoutException
-from netmiko import ConnectHandler, file_transfer
 import gzip
-import json
-import re
 import ipaddress
+import json
 import os
+import re
+import click
 from datetime import date, time, datetime, timedelta
+
+from netmiko import ConnectHandler, file_transfer
+from netmiko.ssh_exception import AuthenticationException, NetMikoTimeoutException
 
 
 def connection_to_server(ssh_username, ssh_password, device_ip):
@@ -46,40 +48,40 @@ def validate_user_input(user_input):
     user_data = {}
     string = re.search(r'(\S+) (\S+ \S+) (\S+ \S+)', user_input)
     if string is None:
-        print('Please, check for entered data.\n')
+        click.echo('\u001b[31mPlease, check for entered data.\n\u001b[0m')
         return None
 
     # Validating ip address:
     try:
         user_data['public_ip'] = ipaddress.ip_address(string.group(1))
     except ValueError:
-        print('ERROR: IP address is invalid.\n')
+        print('\u001b[31mERROR: IP address is invalid.\u001b[0m\n')
         return None
     if user_data['public_ip'].is_private:
-        print('ERROR: IP address is private.\n')
+        print('\u001b[31mERROR: IP address is private.\u001b[0m\n')
         return None
 
     # Validating start date and time:
     try:
         user_data['start_datetime'] = datetime.fromisoformat(string.group(2))
     except ValueError:
-        print('ERROR: Start date or time is invalid.\n')
+        print('\u001b[31mERROR: Start date or time is invalid.\u001b[0m\n')
         return None
     if user_data['start_datetime'] > datetime.today():
-        print('ERROR: Start date or time is in the future.\n')
+        print('\u001b[31mERROR: Start date or time is in the future.\u001b[0m\n')
         return None
 
     # Validating stop date and time:
     try:
         user_data['stop_datetime'] = datetime.fromisoformat(string.group(3))
     except ValueError:
-        print('ERROR: Stop date or time is invalid.\n')
+        print('\u001b[31mERROR: Stop date or time is invalid.\u001b[0m\n')
         return None
     if user_data['stop_datetime'] > datetime.today():
-        print('ERROR: Stop date or time is in the future.\n')
+        print('\u001b[31mERROR: Stop date or time is in the future.\u001b[0m\n')
         return None
     elif user_data['stop_datetime'] < user_data['start_datetime']:
-        print('ERROR: End time less than start time.\n')
+        print('\u001b[31mERROR: End time less than start time.\u001b[0m\n')
         return None
 
     return user_data
@@ -91,7 +93,7 @@ def search_for_cgnat_name(ip_address, nat_pools):
             cgn_hostname = nat_pools[key]
             print(f'This ip belongs to {key} pool on {cgn_hostname}.')
             return cgn_hostname
-    print('SORRY. This ip don\'t belongs to any nat pool. Please, check the ip.')
+    print('\u001b[31mSORRY. This ip don\'t belongs to any nat pool. Please, check the ip.\u001b[0m')
 
 
 def calculate_archive_date(start_datetime):
@@ -161,7 +163,13 @@ def write_to_file(private_ip_list):
     pass
 
 
-def main():
+@click.command()
+@click.option("-f", "user_data_file", type=click.File(), help='File to read the requests from')
+@click.option("-h", "hours_from_start", type=int, help='Set hours number from start date as time period')
+@click.option("-m", 'minutes_from_start', type=int, help='Set minutes number from start date as time period')
+@click.option("-s", 'seconds_from_start', type=int, help='Set seconds number from start date as time period')
+@click.option("--screen", "is_on_screen_only", is_flag=True, help='Show results only on screen, do not write to file')
+def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_start, is_on_screen_only):
     # Path to parameters file:
     parameters_path = os.path.join(os.path.dirname(__file__), 'parameters.json')
     with open(parameters_path) as parameters_file:
@@ -174,61 +182,79 @@ def main():
 
     shit_counter = 0
 
-    # Loop for the whole script:
-    while True:
-        # Waiting for valid user data to be entered:
-        print('\nThis script searches private ip addresses which been translated by nat')
+    if is_on_screen_only:
+        click.echo('Results won\'t be written to file!')
+
+    # If filename is given:
+    if user_data_file:
+        click.echo('\nThis script searches private ip addresses which been translated by nat.')
+        click.echo('The format should be used: \u001b[32m<public_ip> <start_date> <start_time> <stop_date> '
+                   '<stop_time>\u001b[0m')
+        click.echo('OR, if you\'re using -h, -m, or -s keys: \u001b[32m<public_ip> <start_date> <start_time>\u001b[0m.')
+        click.echo('Search data will be read from file.\n')
+
+        for line in user_data_file:
+            click.echo(f'\u001b[34mREQUEST:\u001b[0m {line}')
+            search_data = validate_user_input(line)
+    else:
+        # If filename wasn't given, acting in dialog mode:
         while True:
-            if shit_counter < 5:
-                print('The format should be used: <public_ip> <start_date> <start_time> <stop_date> <stop_time>')
+            # Waiting for valid user data to be entered:
+            click.echo('\nThis script searches private ip addresses which been translated by nat.')
+            while True:
+                if shit_counter < 5:
+                    click.echo('The format should be used: \u001b[32m<public_ip> <start_date> <start_time> <stop_date> '
+                               '<stop_time>\u001b[0m')
+                else:
+                    click.echo('Ah shit, here we go again.')
+                click.echo('An example: 11.1.1.1 2020-09-01 19:56 2020-09-01 20:05\n')
+
+                # Entering data and checking if it's valid:
+                search_data = validate_user_input(click.prompt('\u001b[34mWhat are we searching?>\u001b[0m', type=str))
+                if search_data is not None:
+                    shit_counter = 0
+                    break
+                else:
+                    shit_counter += 1
+
+            # Searching for a CGN hostname:
+            cgn_hostname = search_for_cgnat_name(search_data['public_ip'], nat_pools)
+
+            # Calculating the needed archive date:
+            archive_date = calculate_archive_date(search_data['start_datetime'])
+
+            # Connecting to syslog server:
+            print('Connecting to the syslog server... ')
+            ssh_connection = connection_to_server(ssh_username, ssh_password, device_ip)
+            if archive_date != 'TODAY':
+                server_output = ssh_connection.send_command(
+                    f'ls -oh --sort=time --time-style="long-iso" /var/log/{cgn_hostname}/ | grep "{archive_date}"')
+                archive_name = re.search(r'secured-pba\.log\.\d+\.gz', server_output).group()
             else:
-                print('Ah shit, here we go again.')
-            print('An example: 11.1.1.1 2020-09-01 19:56 2020-09-01 20:05\n')
+                archive_name = 'secured-pba.log'
 
-            # Entering data and checking if it's valid:
-            search_data = validate_user_input(input('What are we searching?> '))
-            if search_data is not None:
-                shit_counter = 0
-                break
+            # Downloading a log file:
+            print(f"Path: '/var/log/{cgn_hostname}/{archive_name}', date is {archive_date}.")
+            print('Downloading the log file... ')
+            file_transfer(ssh_connection, source_file=archive_name, dest_file=archive_name,
+                          file_system=f'/var/log/{cgn_hostname}/', disable_md5=True, direction='get',
+                          overwrite_file=False)
+
+            # Opening the log file and pull only logs from required time period:
+            print('Parsing the log file...')
+            main_period_logs, additional_period_logs = get_specific_period_logs(archive_name, search_data)
+
+            # Creating private ip addresses list:
+            private_ip_list = get_private_ip_list(main_period_logs, additional_period_logs)
+
+            if len(private_ip_list) == 0:
+                print('No addresses have been found.\n\n')
             else:
-                shit_counter += 1
-
-        # Searching for a CGN hostname:
-        cgn_hostname = search_for_cgnat_name(search_data['public_ip'], nat_pools)
-
-        # Calculating the needed archive date:
-        archive_date = calculate_archive_date(search_data['start_datetime'])
-
-        # Connecting to syslog server:
-        print('Connecting to the syslog server... ')
-        ssh_connection = connection_to_server(ssh_username, ssh_password, device_ip)
-        if archive_date != 'TODAY':
-            server_output = ssh_connection.send_command(
-                f'ls -oh --sort=time --time-style="long-iso" /var/log/{cgn_hostname}/ | grep "{archive_date}"')
-            archive_name = re.search(r'secured-pba\.log\.\d+\.gz', server_output).group()
-        else:
-            archive_name = 'secured-pba.log'
-
-        # Downloading a log file:
-        print(f"Path: '/var/log/{cgn_hostname}/{archive_name}', date is {archive_date}.")
-        print('Downloading the log file... ')
-        file_transfer(ssh_connection, source_file=archive_name, dest_file=archive_name,
-                      file_system=f'/var/log/{cgn_hostname}/', disable_md5=True, direction='get', overwrite_file=True)
-
-        # Opening the log file and pull only logs from required time period:
-        print('Parsing the log file...')
-        main_period_logs, additional_period_logs = get_specific_period_logs(archive_name, search_data)
-
-        # Creating private ip addresses list:
-        private_ip_list = get_private_ip_list(main_period_logs, additional_period_logs)
-
-        if len(private_ip_list) == 0:
-            print('No addresses have been found.\n\n')
-        else:
-            print(f'{len(private_ip_list)} addresses have been found:\n')
-            for private_ip in private_ip_list:
-                print(private_ip)
+                print(f'{len(private_ip_list)} addresses have been found:\n')
+                for private_ip in private_ip_list:
+                    print(private_ip)
 
 
+# STARTING SCRIPT:
 if __name__ == '__main__':
     main()
