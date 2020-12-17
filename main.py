@@ -123,6 +123,7 @@ def string_parsing(f, search_data, decode=True):
         elif log_datetime > search_data['stop_datetime'] + timedelta(minutes=30) and str(
                 search_data['public_ip']) in line:
             break
+
     return main_period_logs, additional_period_logs
 
 
@@ -154,6 +155,10 @@ def get_private_ip_list(main_period_logs, additional_period_logs):
                 private_ip_list.append(private_ip)
 
     return private_ip_list
+
+
+def write_to_file(private_ip_list):
+    pass
 
 
 def main():
@@ -205,7 +210,7 @@ def main():
             archive_name = 'secured-pba.log'
 
         # Downloading a log file:
-        print(f"Path to log file: '/var/log/{cgn_hostname}/{archive_name}', date is {archive_date}.")
+        print(f"Path: '/var/log/{cgn_hostname}/{archive_name}', date is {archive_date}.")
         print('Downloading the log file... ')
         file_transfer(ssh_connection, source_file=archive_name, dest_file=archive_name,
                       file_system=f'/var/log/{cgn_hostname}/', disable_md5=True, direction='get', overwrite_file=True)
@@ -219,9 +224,10 @@ def main():
 
         if len(private_ip_list) == 0:
             print('No addresses have been found.\n\n')
-        print(f'{len(private_ip_list)} addresses have been found. Here they are:\n')
-        for private_ip in private_ip_list:
-            print(private_ip)
+        else:
+            print(f'{len(private_ip_list)} addresses have been found:\n')
+            for private_ip in private_ip_list:
+                print(private_ip)
 
 
 if __name__ == '__main__':
