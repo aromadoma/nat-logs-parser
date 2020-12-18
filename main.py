@@ -203,14 +203,16 @@ def handling_request(search_data, parameters):
     # Downloading a log file:
     print(f"Path: '/var/log/{cgn_hostname}/{archive_name}', date is {archive_date}.")
     print('Downloading the log file... ')
+
+    dest_file = os.path.join(os.path.dirname(__file__), archive_name)
     if archive_date == 'TODAY':
         # Do not check MD5 and do re-download archive if it's a today log:
-        file_transfer(ssh_connection, source_file=archive_name, dest_file=archive_name,
+        file_transfer(ssh_connection, source_file=archive_name, dest_file=dest_file,
                       file_system=f'/var/log/{cgn_hostname}/', disable_md5=True, direction='get',
                       overwrite_file=True)
     else:
         # CHECK MD5 and DO NOT re-download archive if it's an old one:
-        file_transfer(ssh_connection, source_file=archive_name, dest_file=archive_name,
+        file_transfer(ssh_connection, source_file=archive_name, dest_file=dest_file,
                       file_system=f'/var/log/{cgn_hostname}/', disable_md5=False, direction='get',
                       overwrite_file=False)
 
