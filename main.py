@@ -56,7 +56,7 @@ def get_timedelta(hours_from_start, minutes_from_start, seconds_from_start):
     return user_timedelta
 
 
-def validate_user_input(user_input, hours_from_start, minutes_from_start, seconds_from_start):
+def validate_user_input(user_input, hours_from_start=None, minutes_from_start=None, seconds_from_start=None):
     user_data = {'timedelta': timedelta()}
     if hours_from_start or minutes_from_start or seconds_from_start:
         string = re.search(r'(\S+) (\S+ \S+)', user_input)
