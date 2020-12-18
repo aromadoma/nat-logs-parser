@@ -138,14 +138,15 @@ def string_parsing(f, search_data, decode=True):
             line = line.decode('utf-8')
         log_datetime = datetime.fromisoformat(re.search(r'^(\S+)\+03:00', line).group(1))
         # Adding logs from main period:
-        if search_data['start_datetime'] <= log_datetime <= search_data['stop_datetime'] and str(search_data['public_ip']) in line:
+        if search_data['start_datetime'] <= log_datetime <= search_data['stop_datetime'] and str(
+                search_data['public_ip']) in line:
             main_period_logs.append(line.rstrip('\n'))
         # There is need to check additional period, only if stop_datetime - start_datetime < 30 minutes:
         elif search_data['stop_datetime'] - search_data['start_datetime'] < timedelta(minutes=30):
             if search_data['stop_datetime'] <= log_datetime <= search_data['start_datetime'] + timedelta(
                     minutes=30) and str(search_data['public_ip']) in line:
                 additional_period_logs.append(line.rstrip('\n'))
-        # Stop interations if log is outside the time period:
+            # Stop interations if log is outside the time period:
             elif log_datetime > search_data['start_datetime'] + timedelta(minutes=30):
                 break
         elif log_datetime > search_data['stop_datetime']:
@@ -254,7 +255,12 @@ def handling_request(search_data, parameters):
 @click.option("-s", 'seconds_from_start', type=int, help='Set seconds number from start date as time period')
 @click.option("--screen", 'show_on_screen', is_flag=True, help='Display the found private ip list on the screen')
 @click.option("--dnw", 'do_not_write', is_flag=True, help='Do not write results to file, show only on the screen')
+# @click.option("--info", 'get_info', callback='get_info', help='Show info about requirements')
 def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_start, show_on_screen, do_not_write):
+    # Checking if -h, -m, -s keys have been used without -f key. It's not possible for now:
+    if (hours_from_start or minutes_from_start or seconds_from_start) and not user_data_file:
+        click.echo('\u001b[32mNOTIFICATION:\u001b[0m Time periods can\'t be used without file for now.')
+        click.echo('\u001b[32mNOTIFICATION:\u001b[0m You should use the full format of request, as in example.')
     # Path to parameters file:
     parameters_path = os.path.join(os.path.dirname(__file__), 'parameters.json')
     with open(parameters_path) as parameters_file:
@@ -309,7 +315,7 @@ def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_star
 
                 # Entering data and checking if it's valid:
                 search_data = validate_user_input(click.prompt('\u001b[34mWhat are we searching?>\u001b[0m', type=str))
-                if search_data is not None:
+                if search_data:
                     break
                 else:
                     shit_counter += 1
