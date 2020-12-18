@@ -107,12 +107,14 @@ def validate_user_input(user_input, hours_from_start=None, minutes_from_start=No
 
 
 def search_for_cgnat_name(ip_address, nat_pools):
-    for key in nat_pools:
-        if ip_address in ipaddress.ip_network(key):
-            cgn_hostname = nat_pools[key]
-            click.echo(f'This ip belongs to {key} pool on {cgn_hostname}.')
+    for pool in nat_pools:
+        if ip_address in ipaddress.ip_network(pool):
+            cgn_hostname = nat_pools[pool]
+            click.echo(f'This ip belongs to {pool} pool on {cgn_hostname}.')
             return cgn_hostname
     click.echo('\u001b[31mSORRY. This ip doesn\'t belong to any nat pool. Please, check the ip.\u001b[0m')
+
+    return None
 
 
 def calculate_archive_date(start_datetime):
@@ -185,6 +187,9 @@ def get_private_ip_list(main_period_logs, additional_period_logs):
 def handling_request(search_data, parameters):
     # Searching for a CGN hostname:
     cgn_hostname = search_for_cgnat_name(search_data['public_ip'], parameters['nat_pools'])
+    # Check if there is no such nat pool:
+    if not cgn_hostname:
+        return None
 
     # Calculating the needed archive date:
     archive_date = calculate_archive_date(search_data['start_datetime'])
