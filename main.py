@@ -116,14 +116,18 @@ def string_parsing(f, search_data, decode=True):
         if decode:
             line = line.decode('utf-8')
         log_datetime = datetime.fromisoformat(re.search(r'^(\S+)\+03:00', line).group(1))
-        if search_data['start_datetime'] <= log_datetime <= search_data['stop_datetime'] and str(
-                search_data['public_ip']) in line:
+        # Adding logs from main period:
+        if search_data['start_datetime'] <= log_datetime <= search_data['stop_datetime'] and str(search_data['public_ip']) in line:
             main_period_logs.append(line.rstrip('\n'))
-        elif search_data['stop_datetime'] <= log_datetime <= search_data['stop_datetime'] + timedelta(
-                minutes=30) and str(search_data['public_ip']) in line:
-            additional_period_logs.append(line.rstrip('\n'))
-        elif log_datetime > search_data['stop_datetime'] + timedelta(minutes=30) and str(
-                search_data['public_ip']) in line:
+        # There is need to check additional period, only if stop_datetime - start_datetime < 30 minutes:
+        elif search_data['stop_datetime'] - search_data['start_datetime'] < timedelta(minutes=30):
+            if search_data['stop_datetime'] <= log_datetime <= search_data['start_datetime'] + timedelta(
+                    minutes=30) and str(search_data['public_ip']) in line:
+                additional_period_logs.append(line.rstrip('\n'))
+        # Stop interations if log is outside the time period:
+            elif log_datetime > search_data['start_datetime'] + timedelta(minutes=30):
+                break
+        elif log_datetime > search_data['stop_datetime']:
             break
 
     return main_period_logs, additional_period_logs
