@@ -31,16 +31,16 @@ def connection_to_server(ssh_username, ssh_password, device_ip):
         try:
             ssh_connection = ConnectHandler(**connection_settings)
         except AuthenticationException:
-            print('Wrong username\\password. Please, check credentials.\n')
+            click.echo('\u001b[31mWrong username\\password. Please, check credentials.\u001b[0m\n')
             i += 1
         except NetMikoTimeoutException:
-            print('Syslog is unreachable for now. Trying again...\n')
+            click.echo('\u001b[31mSyslog is unreachable for now. Trying again...\u001b[0m\n')
             i += 1
         else:
             # print('Successfully authenticated.')
             return ssh_connection
 
-    print(f'Cannot connect to syslog. Skipping')
+    click.echo('\u001b[31mCannot connect to syslog.\u001b[0m')
     return None
 
 
@@ -55,33 +55,33 @@ def validate_user_input(user_input):
     try:
         user_data['public_ip'] = ipaddress.ip_address(string.group(1))
     except ValueError:
-        print('\u001b[31mERROR: IP address is invalid.\u001b[0m\n')
+        click.echo('\u001b[31mERROR: IP address is invalid.\u001b[0m\n')
         return None
     if user_data['public_ip'].is_private:
-        print('\u001b[31mERROR: IP address is private.\u001b[0m\n')
+        click.echo('\u001b[31mERROR: IP address is private.\u001b[0m\n')
         return None
 
     # Validating start date and time:
     try:
         user_data['start_datetime'] = datetime.fromisoformat(string.group(2))
     except ValueError:
-        print('\u001b[31mERROR: Start date or time is invalid.\u001b[0m\n')
+        click.echo('\u001b[31mERROR: Start date or time is invalid.\u001b[0m\n')
         return None
     if user_data['start_datetime'] > datetime.today():
-        print('\u001b[31mERROR: Start date or time is in the future.\u001b[0m\n')
+        click.echo('\u001b[31mERROR: Start date or time is in the future.\u001b[0m\n')
         return None
 
     # Validating stop date and time:
     try:
         user_data['stop_datetime'] = datetime.fromisoformat(string.group(3))
     except ValueError:
-        print('\u001b[31mERROR: Stop date or time is invalid.\u001b[0m\n')
+        click.echo('\u001b[31mERROR: Stop date or time is invalid.\u001b[0m\n')
         return None
     if user_data['stop_datetime'] > datetime.today():
-        print('\u001b[31mERROR: Stop date or time is in the future.\u001b[0m\n')
+        click.echo('\u001b[31mERROR: Stop date or time is in the future.\u001b[0m\n')
         return None
     elif user_data['stop_datetime'] < user_data['start_datetime']:
-        print('\u001b[31mERROR: End time less than start time.\u001b[0m\n')
+        click.echo('\u001b[31mERROR: End time less than start time.\u001b[0m\n')
         return None
 
     return user_data
@@ -91,9 +91,9 @@ def search_for_cgnat_name(ip_address, nat_pools):
     for key in nat_pools:
         if ip_address in ipaddress.ip_network(key):
             cgn_hostname = nat_pools[key]
-            print(f'This ip belongs to {key} pool on {cgn_hostname}.')
+            click.echo(f'This ip belongs to {key} pool on {cgn_hostname}.')
             return cgn_hostname
-    print('\u001b[31mSORRY. This ip doesn\'t belong to any nat pool. Please, check the ip.\u001b[0m')
+    click.echo('\u001b[31mSORRY. This ip doesn\'t belong to any nat pool. Please, check the ip.\u001b[0m')
 
 
 def calculate_archive_date(start_datetime):
@@ -168,7 +168,8 @@ def handling_request(search_data, parameters):
 
     # Connecting to syslog server:
     print('Connecting to the syslog server... ')
-    ssh_connection = connection_to_server(parameters['ssh_username'], parameters['ssh_password'], parameters['device_ip'])
+    ssh_connection = connection_to_server(parameters['ssh_username'], parameters['ssh_password'],
+                                          parameters['device_ip'])
     if archive_date != 'TODAY':
         server_output = ssh_connection.send_command(
             f'ls -oh --sort=time --time-style="long-iso" /var/log/{cgn_hostname}/ | grep "{archive_date}"')
@@ -179,9 +180,16 @@ def handling_request(search_data, parameters):
     # Downloading a log file:
     print(f"Path: '/var/log/{cgn_hostname}/{archive_name}', date is {archive_date}.")
     print('Downloading the log file... ')
-    file_transfer(ssh_connection, source_file=archive_name, dest_file=archive_name,
-                  file_system=f'/var/log/{cgn_hostname}/', disable_md5=True, direction='get',
-                  overwrite_file=False)
+    if archive_date == 'TODAY':
+        # Do not check MD5 and do re-download archive if it's a today log:
+        file_transfer(ssh_connection, source_file=archive_name, dest_file=archive_name,
+                      file_system=f'/var/log/{cgn_hostname}/', disable_md5=True, direction='get',
+                      overwrite_file=True)
+    else:
+        # CHECK MD5 and DO NOT re-download archive if it's an old one:
+        file_transfer(ssh_connection, source_file=archive_name, dest_file=archive_name,
+                      file_system=f'/var/log/{cgn_hostname}/', disable_md5=False, direction='get',
+                      overwrite_file=False)
 
     # Opening the log file and pull only logs from required time period:
     print('Parsing the log file...')
@@ -190,18 +198,23 @@ def handling_request(search_data, parameters):
     # Creating private ip addresses list:
     private_ip_list = get_private_ip_list(main_period_logs, additional_period_logs)
 
+    # Printing results:
     if len(private_ip_list) == 0:
-        print('No addresses have been found.\n\n')
+        print('No addresses have been found.\n')
     else:
-        print(f'{len(private_ip_list)} addresses have been found:\n')
-        for private_ip in private_ip_list:
-            print(private_ip)
+        print(f'{len(private_ip_list)} addresses have been found.\n')
+        if not parameters['do_not_write']:
+            parameters['output_file'].write('********************************************************************\n')
+            parameters['output_file'].write(
+                f"REQUEST: {search_data['public_ip']} {search_data['start_datetime']} {search_data['stop_datetime']}\n")
+            parameters['output_file'].write('********************************************************************\n')
+            for private_ip in private_ip_list:
+                parameters['output_file'].write(private_ip + '\n')
+        if parameters['show_on_screen']:
+            for private_ip in private_ip_list:
+                print(f'\u001b[32m{private_ip}\u001b[0m')
 
     return None
-
-
-def write_to_file(private_ip_list):
-    pass
 
 
 @click.command()
@@ -209,19 +222,22 @@ def write_to_file(private_ip_list):
 @click.option("-h", "hours_from_start", type=int, help='Set hours number from start date as time period')
 @click.option("-m", 'minutes_from_start', type=int, help='Set minutes number from start date as time period')
 @click.option("-s", 'seconds_from_start', type=int, help='Set seconds number from start date as time period')
-@click.option("--screen", 'show_on_screen', is_flag=True, help='Show private ip list on screen')
-def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_start, show_on_screen):
+@click.option("--screen", 'show_on_screen', is_flag=True, help='Display the found private ip list on the screen')
+@click.option("--dnw", 'do_not_write', is_flag=True, help='Do not write results to file, show only on the screen')
+def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_start, show_on_screen, do_not_write):
     # Path to parameters file:
     parameters_path = os.path.join(os.path.dirname(__file__), 'parameters.json')
     with open(parameters_path) as parameters_file:
         # Loading parameters:
         parameters = json.load(parameters_file)
+        # In addition to parameters.json updating the dictionary with keys from console:
         parameters['hours_from_start'] = hours_from_start
         parameters['minutes_from_start'] = minutes_from_start
         parameters['seconds_from_start'] = seconds_from_start
         parameters['show_on_screen'] = show_on_screen
-
-    shit_counter = 0
+        parameters['do_not_write'] = do_not_write
+        if do_not_write:
+            parameters['show_on_screen'] = True
 
     # If filename is given:
     if user_data_file:
@@ -229,19 +245,30 @@ def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_star
         click.echo('The format should be used: \u001b[32m<public_ip> <start_date> <start_time> <stop_date> '
                    '<stop_time>\u001b[0m')
         click.echo('OR, if you\'re using -h, -m, or -s keys: \u001b[32m<public_ip> <start_date> <start_time>\u001b[0m.')
-        click.echo('Search data will be read from file.\n')
+        click.echo('Search data will be read from file.')
 
+        # Creating a file for outputs:
+        if not do_not_write:
+            parameters['output_file'] = open(f"request-{datetime.now().strftime('%Y-%m-%d-%H-%M')}.txt", 'a')
+
+        # User request handling line by line:
         for line in user_data_file:
-            click.echo(f'\u001b[34mREQUEST:\u001b[0m {line}')
+            if re.search(r'^\s*#', line):  # Handling comment lines
+                continue
+            click.echo(f'\n\u001b[34mREQUEST:\u001b[0m {line}')
             # Checking if data from file are valid:
             search_data = validate_user_input(line)
-            if search_data is not None:
-                # User request handling line by line:
+            if search_data:
                 handling_request(search_data, parameters)
+
+        # Closing the file for outputs:
+        if not do_not_write:
+            parameters['output_file'].close()
 
     else:
         # If filename wasn't given, acting in dialog mode:
         while True:
+            shit_counter = 0
             # Waiting for valid user data to be entered:
             click.echo('\nThis script searches private ip addresses which been translated by nat.')
             while True:
@@ -255,7 +282,6 @@ def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_star
                 # Entering data and checking if it's valid:
                 search_data = validate_user_input(click.prompt('\u001b[34mWhat are we searching?>\u001b[0m', type=str))
                 if search_data is not None:
-                    shit_counter = 0
                     break
                 else:
                     shit_counter += 1
@@ -264,7 +290,5 @@ def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_star
             handling_request(search_data, parameters)
 
 
-
-# STARTING SCRIPT:
 if __name__ == '__main__':
     main()
