@@ -253,10 +253,38 @@ def handling_request(search_data, parameters):
 @click.option("-h", "hours_from_start", type=int, help='Set hours number from start date as time period')
 @click.option("-m", 'minutes_from_start', type=int, help='Set minutes number from start date as time period')
 @click.option("-s", 'seconds_from_start', type=int, help='Set seconds number from start date as time period')
-@click.option("--screen", 'show_on_screen', is_flag=True, help='Display the found private ip list on the screen')
+@click.option("--screen", 'show_on_screen', is_flag=True, help='Show the found private ip list on the screen')
 @click.option("--dnw", 'do_not_write', is_flag=True, help='Do not write results to file, show only on the screen')
 # @click.option("--info", 'get_info', callback='get_info', help='Show info about requirements')
 def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_start, show_on_screen, do_not_write):
+    """
+
+    This script searches private ip addresses which been translated to one public ip by nat.
+    File parameters.json is needed for this script.
+
+    \b
+    The sctructure of the parameters.json:
+    {
+      \u001b[35m"ssh_username"\u001b[0m: \u001b[32m"syslog_user"\u001b[0m
+      \u001b[35m"ssh_password"\u001b[0m: \u001b[32m"syslog_pass"\u001b[0m
+      \u001b[35m"device_ip"\u001b[0m: \u001b[32m"syslog_ip"\u001b[0m,
+      \u001b[35m"nat_pools"\u001b[0m: {
+        \u001b[35m"nat-pool-network/mask"\u001b[0m: \u001b[32m"CGN-01-HOSTNAME"\u001b[0m,
+        \u001b[35m"nat-pool-network/mask"\u001b[0m: \u001b[32m"CGN-02-HOSTNAME"\u001b[0m
+    }
+
+    \u001b[35mnat_pools\u001b[0m dictionary is used for CGN hostname defining, because the logs are stored
+    in /var/log/<CGN-hostname> directory on the server.
+
+    The script works as console utilite and can use --keys, but there is also a regular interactive mode.
+    If you read requests from file (-f key), than you can use -h, -m and -s keys, instead of using full form of request.
+    If you use interactive mode, there is possibility to use only --screen and --dnw keys.
+
+    Full request format: \u001b[32m<public_ip> <start_date> <start_time> <stop_date> <stop_time>\u001b[0m,
+    where date looks like YYYY-MM-DD and time is HH:MM. Seconds (:SS) also can be added, if needed. An example:
+
+    \u001b[32m11.1.1.1 2020-09-01 19:56 2020-09-01 20:05:30\u001b[0m
+    """
     # Checking if -h, -m, -s keys have been used without -f key. It's not possible for now:
     if (hours_from_start or minutes_from_start or seconds_from_start) and not user_data_file:
         click.echo('\u001b[32mNOTIFICATION:\u001b[0m Time periods can\'t be used without file for now.')
@@ -282,7 +310,7 @@ def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_star
 
         # Creating a file for outputs:
         if not do_not_write:
-            parameters['output_file'] = open(f"request-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.txt", 'a')
+            parameters['output_file'] = open(f"request-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.txt", 'w')
 
         # User request handling line by line:
         for line in user_data_file:
