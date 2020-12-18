@@ -44,9 +44,25 @@ def connection_to_server(ssh_username, ssh_password, device_ip):
     return None
 
 
-def validate_user_input(user_input):
-    user_data = {}
-    string = re.search(r'(\S+) (\S+ \S+) (\S+ \S+)', user_input)
+def get_timedelta(hours_from_start, minutes_from_start, seconds_from_start):
+    user_timedelta = timedelta()
+    if hours_from_start:
+        user_timedelta += timedelta(hours=hours_from_start)
+    if minutes_from_start:
+        user_timedelta += timedelta(minutes=minutes_from_start)
+    if seconds_from_start:
+        user_timedelta += timedelta(seconds=seconds_from_start)
+
+    return user_timedelta
+
+
+def validate_user_input(user_input, hours_from_start, minutes_from_start, seconds_from_start):
+    user_data = {'timedelta': timedelta()}
+    if hours_from_start or minutes_from_start or seconds_from_start:
+        string = re.search(r'(\S+) (\S+ \S+)', user_input)
+        user_data['timedelta'] = get_timedelta(hours_from_start, minutes_from_start, seconds_from_start)
+    else:
+        string = re.search(r'(\S+) (\S+ \S+) (\S+ \S+)', user_input)
     if string is None:
         click.echo('\u001b[31mPlease, check for entered data.\n\u001b[0m')
         return None
@@ -72,11 +88,14 @@ def validate_user_input(user_input):
         return None
 
     # Validating stop date and time:
-    try:
-        user_data['stop_datetime'] = datetime.fromisoformat(string.group(3))
-    except ValueError:
-        click.echo('\u001b[31mERROR: Stop date or time is invalid.\u001b[0m\n')
-        return None
+    if user_data['timedelta']:
+        user_data['stop_datetime'] = user_data['start_datetime'] + user_data['timedelta']
+    else:
+        try:
+            user_data['stop_datetime'] = datetime.fromisoformat(string.group(3))
+        except ValueError:
+            click.echo('\u001b[31mERROR: Stop date or time is invalid.\u001b[0m\n')
+            return None
     if user_data['stop_datetime'] > datetime.today():
         click.echo('\u001b[31mERROR: Stop date or time is in the future.\u001b[0m\n')
         return None
@@ -222,7 +241,7 @@ def handling_request(search_data, parameters):
 
 
 @click.command()
-@click.option("-f", "user_data_file", type=click.File(), help='File to read the requests from')
+@click.option("-f", "user_data_file", type=click.File(), help='File to read requests from')
 @click.option("-h", "hours_from_start", type=int, help='Set hours number from start date as time period')
 @click.option("-m", 'minutes_from_start', type=int, help='Set minutes number from start date as time period')
 @click.option("-s", 'seconds_from_start', type=int, help='Set seconds number from start date as time period')
@@ -235,9 +254,6 @@ def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_star
         # Loading parameters:
         parameters = json.load(parameters_file)
         # In addition to parameters.json updating the dictionary with keys from console:
-        parameters['hours_from_start'] = hours_from_start
-        parameters['minutes_from_start'] = minutes_from_start
-        parameters['seconds_from_start'] = seconds_from_start
         parameters['show_on_screen'] = show_on_screen
         parameters['do_not_write'] = do_not_write
         if do_not_write:
@@ -253,15 +269,16 @@ def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_star
 
         # Creating a file for outputs:
         if not do_not_write:
-            parameters['output_file'] = open(f"request-{datetime.now().strftime('%Y-%m-%d-%H-%M')}.txt", 'a')
+            parameters['output_file'] = open(f"request-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.txt", 'a')
 
         # User request handling line by line:
         for line in user_data_file:
+            line = line.rstrip('\n')
             if re.search(r'^\s*#', line):  # Handling comment lines
                 continue
             click.echo(f'\n\u001b[34mREQUEST:\u001b[0m {line}')
             # Checking if data from file are valid:
-            search_data = validate_user_input(line)
+            search_data = validate_user_input(line, hours_from_start, minutes_from_start, seconds_from_start)
             if search_data:
                 handling_request(search_data, parameters)
 
