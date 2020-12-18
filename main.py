@@ -44,23 +44,23 @@ def connection_to_server(ssh_username, ssh_password, device_ip):
     return None
 
 
-def get_timedelta(hours_from_start, minutes_from_start, seconds_from_start):
+def get_timedelta(hours_from_start, min_from_start, sec_from_start):
     user_timedelta = timedelta()
     if hours_from_start:
         user_timedelta += timedelta(hours=hours_from_start)
-    if minutes_from_start:
-        user_timedelta += timedelta(minutes=minutes_from_start)
-    if seconds_from_start:
-        user_timedelta += timedelta(seconds=seconds_from_start)
+    if min_from_start:
+        user_timedelta += timedelta(minutes=min_from_start)
+    if sec_from_start:
+        user_timedelta += timedelta(seconds=sec_from_start)
 
     return user_timedelta
 
 
-def validate_user_input(user_input, hours_from_start=None, minutes_from_start=None, seconds_from_start=None):
+def validate_user_input(user_input, hours_from_start=None, min_from_start=None, sec_from_start=None):
     user_data = {'timedelta': timedelta()}
-    if hours_from_start or minutes_from_start or seconds_from_start:
+    if hours_from_start or min_from_start or sec_from_start:
         string = re.search(r'(\S+) (\S+ \S+)', user_input)
-        user_data['timedelta'] = get_timedelta(hours_from_start, minutes_from_start, seconds_from_start)
+        user_data['timedelta'] = get_timedelta(hours_from_start, min_from_start, sec_from_start)
     else:
         string = re.search(r'(\S+) (\S+ \S+) (\S+ \S+)', user_input)
     if string is None:
@@ -212,15 +212,15 @@ def handling_request(search_data, parameters):
 
     dest_file = os.path.join(os.path.dirname(__file__), archive_name)
     if archive_date == 'TODAY':
-        # Do not check MD5 and do re-download archive if it's a today log:
+        # Do not check MD5 and re-download archive if it's a today log:
         file_transfer(ssh_connection, source_file=archive_name, dest_file=dest_file,
                       file_system=f'/var/log/{cgn_hostname}/', disable_md5=True, direction='get',
                       overwrite_file=True)
     else:
-        # CHECK MD5 and DO NOT re-download archive if it's an old one:
+        # CHECK MD5 and re-download archive if it's an old one:
         file_transfer(ssh_connection, source_file=archive_name, dest_file=dest_file,
                       file_system=f'/var/log/{cgn_hostname}/', disable_md5=False, direction='get',
-                      overwrite_file=False)
+                      overwrite_file=True)
 
     # Opening the log file and pull only logs from required time period:
     print('Parsing the log file...')
@@ -250,16 +250,20 @@ def handling_request(search_data, parameters):
 
 @click.command()
 @click.option("-f", "user_data_file", type=click.File(), help='File to read requests from')
-@click.option("-h", "hours_from_start", type=int, help='Set hours number from start date as time period')
-@click.option("-m", 'minutes_from_start', type=int, help='Set minutes number from start date as time period')
-@click.option("-s", 'seconds_from_start', type=int, help='Set seconds number from start date as time period')
-@click.option("--screen", 'show_on_screen', is_flag=True, help='Show the found private ip list on the screen')
+@click.option("-l", "user_data_string", type=str, help='Enter request data right in command line')
+@click.option("-h", "hours_from_start", type=int, help='Set hours number from start time as time period')
+@click.option("-m", 'min_from_start', type=int, help='Set minutes number from start time as time period')
+@click.option("-s", 'sec_from_start', type=int, help='Set seconds number from start time as time period')
+@click.option("--show", 'show_on_screen', is_flag=True, help='Show the found private ip list on the screen')
 @click.option("--dnw", 'do_not_write', is_flag=True, help='Do not write results to file, show only on the screen')
-# @click.option("--info", 'get_info', callback='get_info', help='Show info about requirements')
-def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_start, show_on_screen, do_not_write):
+@click.option('-u', '--username', 'ssh_username', prompt='Username', help='Username for ssh connection to server')
+@click.option('-p', '--password', 'ssh_password', prompt='Password', hide_input=True, help='Password for ssh '
+                                                                                           'connection to server')
+def main(user_data_file, hours_from_start, min_from_start, sec_from_start, show_on_screen, do_not_write,
+         ssh_username, ssh_password, user_data_string):
     """
 
-    This script searches private ip addresses which been translated to one public ip by nat.
+    This script searches private ip addresses which been translated to public ip by nat.
     File parameters.json is needed for this script.
 
     \b
@@ -270,25 +274,30 @@ def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_star
       \u001b[35m"device_ip"\u001b[0m: \u001b[32m"syslog_ip"\u001b[0m,
       \u001b[35m"nat_pools"\u001b[0m: {
         \u001b[35m"nat-pool-network/mask"\u001b[0m: \u001b[32m"CGN-01-HOSTNAME"\u001b[0m,
-        \u001b[35m"nat-pool-network/mask"\u001b[0m: \u001b[32m"CGN-02-HOSTNAME"\u001b[0m
+        \u001b[35m"nat-pool-network/mask"\u001b[0m: \u001b[32m"CGN-02-HOSTNAME"\u001b[0m,
+        ...
     }
 
     \u001b[35mnat_pools\u001b[0m dictionary is used for CGN hostname defining, because the logs are stored
     in /var/log/<CGN-hostname> directory on the server.
 
-    The script works as console utilite and can use --keys, but there is also a regular interactive mode.
-    If you read requests from file (-f key), than you can use -h, -m and -s keys, instead of using full form of request.
-    If you use interactive mode, there is possibility to use only --screen and --dnw keys.
+    The script works as console utilite and can use --keys, but there is also a regular mode.
+    If you read requests from file (-f key) or write request after -l key, than you can use short request form with
+     -h, -m and -s keys. These keys are mandatory to know a stop date and time.
+    If you run script in regular mode (without -f or -l), there is possibility to use only full form of request. SORRY
 
-    Full request format: \u001b[32m<public_ip> <start_date> <start_time> <stop_date> <stop_time>\u001b[0m,
-    where date looks like YYYY-MM-DD and time is HH:MM. Seconds (:SS) also can be added, if needed. An example:
+
+    Full request form: \u001b[32m<public_ip> <start_date> <start_time> <stop_date> <stop_time>\u001b[0m.
+    Short request form: \u001b[32m<public_ip> <start_date> <start_time>\u001b[0m.
+    Date looks like YYYY-MM-DD and time is HH:MM. Seconds (:SS) also can be added, if needed. An example:
 
     \u001b[32m11.1.1.1 2020-09-01 19:56 2020-09-01 20:05:30\u001b[0m
     """
     # Checking if -h, -m, -s keys have been used without -f key. It's not possible for now:
-    if (hours_from_start or minutes_from_start or seconds_from_start) and not user_data_file:
+    if (hours_from_start or min_from_start or sec_from_start) and (not user_data_file and not user_data_string):
         click.echo('\u001b[32mNOTIFICATION:\u001b[0m Time periods can\'t be used without file for now.')
         click.echo('\u001b[32mNOTIFICATION:\u001b[0m You should use the full format of request, as in example.')
+
     # Path to parameters file:
     parameters_path = os.path.join(os.path.dirname(__file__), 'parameters.json')
     with open(parameters_path) as parameters_file:
@@ -300,26 +309,24 @@ def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_star
         if do_not_write:
             parameters['show_on_screen'] = True
 
-    # If filename is given:
+    click.echo('\nThis script searches private ip addresses which been translated to public ip by nat.')
+
+    # Reading requests from file:
     if user_data_file:
-        click.echo('\nThis script searches private ip addresses which been translated by nat.')
-        click.echo('The format should be used: \u001b[32m<public_ip> <start_date> <start_time> <stop_date> '
-                   '<stop_time>\u001b[0m')
-        click.echo('OR, if you\'re using -h, -m, or -s keys: \u001b[32m<public_ip> <start_date> <start_time>\u001b[0m.')
-        click.echo('Search data will be read from file.')
+        click.echo('Request will be read from file.')
 
         # Creating a file for outputs:
         if not do_not_write:
             parameters['output_file'] = open(f"request-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.txt", 'w')
 
         # User request handling line by line:
-        for line in user_data_file:
-            line = line.rstrip('\n')
-            if re.search(r'^\s*#', line):  # Handling comment lines
+        for user_data_string in user_data_file:
+            user_data_string = user_data_string.rstrip('\n')
+            if re.search(r'^\s*#', user_data_string):  # Handling comment lines
                 continue
-            click.echo(f'\n\u001b[34mREQUEST:\u001b[0m {line}')
+            click.echo(f'\n\u001b[34mREQUEST:\u001b[0m {user_data_string}')
             # Checking if data from file are valid:
-            search_data = validate_user_input(line, hours_from_start, minutes_from_start, seconds_from_start)
+            search_data = validate_user_input(user_data_string, hours_from_start, min_from_start, sec_from_start)
             if search_data:
                 handling_request(search_data, parameters)
 
@@ -327,12 +334,31 @@ def main(user_data_file, hours_from_start, minutes_from_start, seconds_from_star
         if not do_not_write:
             parameters['output_file'].close()
 
+    # Reading request from command line after '-l' key:
+    elif user_data_string:
+        click.echo('Search data has been pulled from parameters.')
+
+        # Creating a file for outputs:
+        if not do_not_write:
+            parameters['output_file'] = open(f"request-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.txt", 'w')
+
+        # User request handling:
+        click.echo(f'\n\u001b[34mREQUEST:\u001b[0m {user_data_string}')
+        # Checking if data from parameter are valid:
+        search_data = validate_user_input(user_data_string, hours_from_start, min_from_start, sec_from_start)
+        if search_data:
+            handling_request(search_data, parameters)
+
+        # Closing the file for outputs:
+        if not do_not_write:
+            parameters['output_file'].close()
+
+    # If filename wasn't given, acting in dialog mode:
     else:
-        # If filename wasn't given, acting in dialog mode:
         while True:
             shit_counter = 0
             # Waiting for valid user data to be entered:
-            click.echo('\nThis script searches private ip addresses which been translated by nat.')
+            click.echo('\nThis script searches private ip addresses which been translated to public ip by nat.')
             while True:
                 if shit_counter < 5:
                     click.echo('The format should be used: \u001b[32m<public_ip> <start_date> <start_time> <stop_date> '
